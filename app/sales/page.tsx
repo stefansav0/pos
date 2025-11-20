@@ -8,7 +8,6 @@ import SalesKPIs from "@/components/sales/SalesKPIs";
 import SalesHistory from "@/components/sales/SalesHistory";
 import InventorySnapshot from "@/components/sales/InventorySnapshot";
 
-/* ------------------ TYPES ------------------ */
 export interface InventoryItem {
     _id?: string;
     itemName: string;
@@ -43,7 +42,9 @@ export default function SalesPage() {
     const [packagingCost, setPackagingCost] = useState<number>(0);
     const [notes, setNotes] = useState<string>("");
 
-    /* ------------------ LOAD DATA ------------------ */
+    // Dropdown filter state
+    const [reportFilter, setReportFilter] = useState<"Revenue" | "COGS" | "Profit" | "History">("Revenue");
+
     useEffect(() => {
         loadAll();
     }, []);
@@ -53,36 +54,24 @@ export default function SalesPage() {
             apiGet("/api/inventory"),
             apiGet("/api/sales"),
         ]);
-
         setInventory(inv);
         setSales(s);
-
-        if (!selectedItemName && inv.length > 0) {
-            setSelectedItemName(inv[0].itemName);
-        }
+        if (!selectedItemName && inv.length > 0) setSelectedItemName(inv[0].itemName);
     };
 
-    const selectedInventoryItem: InventoryItem | undefined = inventory.find(
-        (it) => it.itemName === selectedItemName
-    );
+    const selectedInventoryItem = inventory.find((it) => it.itemName === selectedItemName);
 
-    /* ------------------ PREVIEW CALC ------------------ */
     const preview = useMemo(() => {
         if (!selectedInventoryItem) return null;
-
         const unitCost = selectedInventoryItem.avgCostPerUnit;
         const revenue = qtySold * sellingPrice;
         const cogs = qtySold * unitCost + deliveryCost + packagingCost;
         const profit = revenue - cogs;
-
         return { unitCost, revenue, cogs, profit };
     }, [selectedInventoryItem, qtySold, sellingPrice, deliveryCost, packagingCost]);
 
-    /* ------------------ SAVE SALE ------------------ */
     const onAddSale = async () => {
-        if (!selectedInventoryItem)
-            return alert("Select an item.");
-
+        if (!selectedInventoryItem) return alert("Select an item.");
         if (qtySold <= 0) return alert("Quantity must be positive.");
         if (qtySold > selectedInventoryItem.unitsAvailable)
             return alert(`Not enough stock. Available: ${selectedInventoryItem.unitsAvailable}`);
@@ -95,16 +84,13 @@ export default function SalesPage() {
             packagingCost,
             revenueTotal: qtySold * sellingPrice,
             cogsTotal: qtySold * selectedInventoryItem.avgCostPerUnit + deliveryCost + packagingCost,
-            profitTotal:
-                qtySold * sellingPrice -
-                (qtySold * selectedInventoryItem.avgCostPerUnit + deliveryCost + packagingCost),
+            profitTotal: qtySold * sellingPrice - (qtySold * selectedInventoryItem.avgCostPerUnit + deliveryCost + packagingCost),
             unitCostBeforeExtras: selectedInventoryItem.avgCostPerUnit,
             notes,
             createdAt: new Date().toISOString(),
         };
 
         await apiPost("/api/sales", payload);
-
         await apiPost("/api/inventory", {
             itemName: selectedInventoryItem.itemName,
             unitsAvailable: selectedInventoryItem.unitsAvailable - qtySold,
@@ -112,7 +98,6 @@ export default function SalesPage() {
         });
 
         loadAll();
-
         setQtySold(1);
         setSellingPrice(0);
         setDeliveryCost(0);
@@ -120,11 +105,9 @@ export default function SalesPage() {
         setNotes("");
     };
 
-    /* ------------------ DELETE + RESTORE STOCK ------------------ */
     const deleteSale = async (id: string) => {
         const sale = sales.find((s) => s._id === id);
         if (!sale) return;
-
         if (!confirm("Delete this sale and restore stock?")) return;
 
         await fetch(`/api/sales?id=${id}`, { method: "DELETE" });
@@ -141,7 +124,6 @@ export default function SalesPage() {
         loadAll();
     };
 
-    /* ------------------ KPIs ------------------ */
     const totals = useMemo(
         () => ({
             revenue: sales.reduce((s, r) => s + r.revenueTotal, 0),
@@ -151,12 +133,11 @@ export default function SalesPage() {
         [sales]
     );
 
-    /* ------------------ UI ------------------ */
     return (
         <div className="max-w-6xl mx-auto p-6">
             <h1 className="text-2xl font-bold mb-4">Sales / Deliveries</h1>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
                 <SalesForm
                     inventory={inventory}
                     selectedItemName={selectedItemName}
@@ -178,9 +159,46 @@ export default function SalesPage() {
                 <InventorySnapshot inventory={inventory} />
             </div>
 
-            <SalesKPIs totals={totals} />
+            {/* Dropdown for report filter */}
+            <div className="mb-4">
+                <label className="block mb-2 font-medium">View Report:</label>
+                <select
+                    className="p-2 border rounded w-full md:w-1/3"
+                    value={reportFilter}
+                    onChange={(e) => setReportFilter(e.target.value as any)}
+                >
+                    <option value="Revenue">Revenue</option>
+                    <option value="COGS">COGS</option>
+                    <option value="Profit">Profit</option>
+                    <option value="History">Sales History</option>
+                </select>
+            </div>
 
-            <SalesHistory sales={sales} deleteSale={deleteSale} />
+            {/* Conditional Rendering based on dropdown */}
+            {reportFilter === "Revenue" && (
+                <div className="mb-4 p-4 bg-white border rounded">
+                    <h2 className="font-semibold mb-2">Revenue</h2>
+                    <div className="text-xl font-bold">₹{totals.revenue.toFixed(2)}</div>
+                </div>
+            )}
+
+            {reportFilter === "COGS" && (
+                <div className="mb-4 p-4 bg-white border rounded">
+                    <h2 className="font-semibold mb-2">COGS</h2>
+                    <div className="text-xl font-bold">₹{totals.cogs.toFixed(2)}</div>
+                </div>
+            )}
+
+            {reportFilter === "Profit" && (
+                <div className="mb-4 p-4 bg-white border rounded">
+                    <h2 className="font-semibold mb-2">Profit</h2>
+                    <div className="text-xl font-bold">₹{totals.profit.toFixed(2)}</div>
+                </div>
+            )}
+
+            {reportFilter === "History" && (
+                <SalesHistory sales={sales} deleteSale={deleteSale} />
+            )}
         </div>
     );
 }

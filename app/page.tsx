@@ -19,10 +19,16 @@ export default function HomePage() {
       color: "bg-blue-100 text-blue-700",
     },
     {
-      name: "Sales / Billing",
+      name: "Sales /",
       href: "/sales",
       icon: <ShoppingCart className="w-8 h-8" />,
       color: "bg-green-100 text-green-700",
+    },
+    {
+      name: "Billing",
+      href: "/billing",
+      icon: <ShoppingCart className="w-8 h-8" />,
+      color: "bg-green-100 text-red-700",
     },
     {
       name: "Purchases",

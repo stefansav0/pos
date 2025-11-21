@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import {
     Minus,
     Plus,
@@ -17,20 +17,21 @@ type InventoryItem = {
     itemName: string;
     avgCostPerUnit?: number;
     unitsAvailable?: number;
-    sellingPrice?: number;
+    sellingPrice?: number; // optional if you add later in DB
 };
 
 type CartItem = {
     id: string;
     itemName: string;
     qty: number;
-    price: number;
+    price: number; // selling price per unit (editable)
 };
 
 /* ------------------ MAIN PAGE ------------------ */
 export default function BillingPage() {
     const [menuItems, setMenuItems] = useState<InventoryItem[]>([]);
     const [cart, setCart] = useState<CartItem[]>([]);
+
     const [search, setSearch] = useState("");
     const [selectedMode, setSelectedMode] = useState<"TABLE" | "TAKEOUT" | "DELIVERY">("TABLE");
     const [discount, setDiscount] = useState<number>(0);
@@ -38,7 +39,6 @@ export default function BillingPage() {
     const [customerPhone, setCustomerPhone] = useState("");
     const [waiterName, setWaiterName] = useState("");
 
-    /* ------------------ LOAD MENU ------------------ */
     useEffect(() => {
         loadMenu();
     }, []);
@@ -57,7 +57,11 @@ export default function BillingPage() {
                     c.itemName === item.itemName ? { ...c, qty: c.qty + 1 } : c
                 );
             }
+
+            // Default selling price:
+            // You can store real selling price in DB: item.sellingPrice
             const defaultPrice = item.sellingPrice ?? 100;
+
             return [
                 ...prev,
                 {
@@ -104,44 +108,55 @@ export default function BillingPage() {
         return menuItems.filter((m) => m.itemName.toLowerCase().includes(s));
     }, [menuItems, search]);
 
-    /* ------------------ BILLING ------------------ */
+    /* ------------------ BILLING HANDLER ------------------ */
     const handleBilling = async () => {
         if (cart.length === 0) {
             alert("No items in bill");
             return;
         }
 
-        const billData = {
-            cart,
+        // 👉 Here you can later POST to /api/bills or /api/sales-bulk
+        // Example payload shape:
+        //
+        // const payload = {
+        //   customerName,
+        //   customerPhone,
+        //   waiterName,
+        //   mode: selectedMode,
+        //   items: cart,
+        //   subtotal,
+        //   discount,
+        //   total: grandTotal,
+        //   paidVia: "UPI",   // or "CASH", etc.
+        //   createdAt: new Date().toISOString(),
+        // };
+        //
+        // await apiPost("/api/bills", payload);
+
+        await apiPost("/api/sales", {
+            items: cart.map((c) => ({
+                itemName: c.itemName,
+                qty: c.qty,
+                price: c.price,
+            })),
+            subtotal,
+            discount,
+            total: grandTotal,
             customerName,
             customerPhone,
             waiterName,
-            discount,
-            total: grandTotal,
             mode: selectedMode,
-            createdAt: new Date(),
-        };
+            createdAt: new Date().toISOString(),
+        });
 
-        try {
-            const res = await fetch("/api/sales", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(billData),
-            });
-            if (res.ok) {
-                alert(`Bill saved. Total: ₹${grandTotal.toFixed(2)}`);
-                setCart([]);
-                setCustomerName("");
-                setCustomerPhone("");
-                setWaiterName("");
-                setDiscount(0);
-            } else {
-                alert("Failed to save bill");
-            }
-        } catch (err) {
-            console.error(err);
-            alert("Error saving bill");
-        }
+        alert("Bill saved successfully!");
+
+
+        // Reset bill after success
+        setCart([]);
+        setDiscount(0);
+        setCustomerName("");
+        setCustomerPhone("");
     };
 
     /* ------------------ UI ------------------ */
@@ -156,6 +171,7 @@ export default function BillingPage() {
                         </div>
                         <span className="font-semibold text-lg">POS Billing</span>
                     </div>
+
                     <div className="hidden md:flex items-center gap-3 text-sm text-gray-600">
                         <span className="flex items-center gap-1">
                             <User className="w-4 h-4" /> {waiterName || "Waiter not set"}
@@ -170,7 +186,7 @@ export default function BillingPage() {
                     </div>
                 </div>
 
-                {/* Modes */}
+                {/* Modes row (like tabs) */}
                 <div className="bg-slate-800">
                     <div className="max-w-7xl mx-auto flex">
                         {(
@@ -210,6 +226,20 @@ export default function BillingPage() {
                                     value={search}
                                     onChange={(e) => setSearch(e.target.value)}
                                 />
+                            </div>
+
+                            {/* Static category pills just for UI (no filter logic yet) */}
+                            <div className="flex gap-1 overflow-x-auto text-xs">
+                                {["All", "Snacks", "Main Course", "Beverages", "Desserts"].map(
+                                    (c) => (
+                                        <button
+                                            key={c}
+                                            className="px-3 py-1 rounded-full border bg-slate-50 text-gray-700 whitespace-nowrap"
+                                        >
+                                            {c}
+                                        </button>
+                                    )
+                                )}
                             </div>
                         </div>
 
@@ -274,7 +304,9 @@ export default function BillingPage() {
                                         {cart.map((c) => (
                                             <tr key={c.id}>
                                                 <td className="border px-1 py-1 align-top">
-                                                    <div className="text-[11px] font-medium">{c.itemName}</div>
+                                                    <div className="text-[11px] font-medium">
+                                                        {c.itemName}
+                                                    </div>
                                                 </td>
                                                 <td className="border px-1 py-1 align-top">
                                                     <div className="flex items-center justify-center gap-1">
@@ -284,7 +316,9 @@ export default function BillingPage() {
                                                         >
                                                             <Minus className="w-3 h-3" />
                                                         </button>
-                                                        <span className="w-6 text-center text-[11px]">{c.qty}</span>
+                                                        <span className="w-6 text-center text-[11px]">
+                                                            {c.qty}
+                                                        </span>
                                                         <button
                                                             className="w-5 h-5 flex items-center justify-center border rounded"
                                                             onClick={() => changeQty(c.id, 1)}
@@ -329,12 +363,16 @@ export default function BillingPage() {
                             </div>
                             <div className="flex justify-between items-center gap-2">
                                 <span>Discount</span>
-                                <input
-                                    type="number"
-                                    className="w-20 border rounded px-1 py-0.5 text-right"
-                                    value={discount}
-                                    onChange={(e) => setDiscount(Number(e.target.value) || 0)}
-                                />
+                                <div className="flex items-center gap-1">
+                                    <input
+                                        type="number"
+                                        className="w-20 border rounded px-1 py-0.5 text-right"
+                                        value={discount}
+                                        onChange={(e) =>
+                                            setDiscount(Number(e.target.value) || 0)
+                                        }
+                                    />
+                                </div>
                             </div>
                             <div className="flex justify-between font-semibold text-sm pt-1 border-t mt-1">
                                 <span>Total</span>
@@ -344,6 +382,7 @@ export default function BillingPage() {
 
                         {/* Customer / UPI / Billing */}
                         <div className="border-t px-3 py-2 text-xs space-y-2">
+                            {/* Customer */}
                             <div className="flex gap-2">
                                 <div className="flex-1">
                                     <div className="flex items-center gap-1 text-[11px] text-gray-600 mb-0.5">
@@ -369,8 +408,11 @@ export default function BillingPage() {
                                 </div>
                             </div>
 
+                            {/* Waiter */}
                             <div>
-                                <div className="text-[11px] text-gray-600 mb-0.5">Waiter / Delivery Boy</div>
+                                <div className="text-[11px] text-gray-600 mb-0.5">
+                                    Waiter / Delivery Boy
+                                </div>
                                 <input
                                     className="w-full border rounded px-2 py-1 text-[11px]"
                                     placeholder="Enter name"
@@ -379,17 +421,21 @@ export default function BillingPage() {
                                 />
                             </div>
 
+                            {/* UPI block */}
                             <div className="flex gap-2 items-center mt-1">
                                 <div className="flex-1 border rounded-md p-2 flex items-center gap-2">
                                     <SmartphoneCharging className="w-5 h-5 text-teal-600" />
                                     <div className="text-[11px]">
                                         <div className="font-semibold">UPI Payment</div>
                                         <div className="text-gray-600">
-                                            Scan QR and pay ₹{grandTotal.toFixed(2)}
+                                            Ask customer to scan QR & pay ₹{grandTotal.toFixed(2)}
                                         </div>
                                     </div>
                                 </div>
-                                <div className="w-16 h-16 border rounded-md flex items-center justify-center text-[10px] text-gray-500">QR</div>
+                                <div className="w-16 h-16 border rounded-md flex items-center justify-center text-[10px] text-gray-500">
+                                    {/* Replace with your real QR image from /public later */}
+                                    QR
+                                </div>
                             </div>
                         </div>
 

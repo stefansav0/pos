@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 
 import InventorySummary from "@/components/inventory/InventorySummary";
 import InventoryTable from "@/components/inventory/InventoryTable";
@@ -51,7 +51,7 @@ type HistoryRow = {
 };
 
 /* ==========================================================
-                MAIN INVENTORY PAGE (Filtered History)
+                MAIN INVENTORY PAGE
 ========================================================== */
 
 export default function InventoryPage() {
@@ -84,7 +84,61 @@ export default function InventoryPage() {
     };
 
     /* ==========================================================
-                        MOVEMENT HISTORY BUILDER
+                        DELETE HISTORY ROW
+    ========================================================== */
+    const deleteHistory = async (row: HistoryRow) => {
+        if (!confirm("Delete this entry? This cannot be undone.")) return;
+
+        /* ----- DELETE PURCHASE ----- */
+        if (row.type === "PURCHASE") {
+            await fetch(`/api/purchases?id=${row._id}`, { method: "DELETE" });
+
+            // rollback inventory
+            const inv = inventory.find((i) => i.itemName === row.itemName);
+            if (inv) {
+                await apiPost("/api/inventory", {
+                    itemName: inv.itemName,
+                    unitsAvailable: inv.unitsAvailable - row.qty,
+                    avgCostPerUnit: inv.avgCostPerUnit,
+                });
+            }
+        }
+
+        /* ----- DELETE SALE ----- */
+        if (row.type === "SALE") {
+            await fetch(`/api/sales?id=${row._id}`, { method: "DELETE" });
+
+            // rollback inventory
+            const inv = inventory.find((i) => i.itemName === row.itemName);
+            if (inv) {
+                await apiPost("/api/inventory", {
+                    itemName: inv.itemName,
+                    unitsAvailable: inv.unitsAvailable + Math.abs(row.qty),
+                    avgCostPerUnit: inv.avgCostPerUnit,
+                });
+            }
+        }
+
+        /* ----- DELETE ADJUSTMENT ----- */
+        if (row.type === "ADJUSTMENT") {
+            await fetch(`/api/adjustments?id=${row._id}`, { method: "DELETE" });
+
+            // reverse adjustment qty
+            const inv = inventory.find((i) => i.itemName === row.itemName);
+            if (inv) {
+                await apiPost("/api/inventory", {
+                    itemName: inv.itemName,
+                    unitsAvailable: inv.unitsAvailable - row.qty,
+                    avgCostPerUnit: inv.avgCostPerUnit,
+                });
+            }
+        }
+
+        await loadAll();
+    };
+
+    /* ==========================================================
+                        MOVEMENT HISTORY
     ========================================================== */
     const movementHistory = useMemo<HistoryRow[]>(() => {
         const rows: HistoryRow[] = [];
@@ -127,17 +181,15 @@ export default function InventoryPage() {
         );
     }, [purchases, sales, adjustments]);
 
-    /* ==========================================================
-                         FILTERED HISTORY
-    ========================================================== */
     const filteredHistory = useMemo(() => {
         if (historyFilter === "ALL") return movementHistory;
         return movementHistory.filter((row) => row.type === historyFilter);
     }, [historyFilter, movementHistory]);
 
     /* ==========================================================
-                          SUMMARY
+                        UI
     ========================================================== */
+
     const totalValue = inventory.reduce(
         (s, it) => s + it.unitsAvailable * it.avgCostPerUnit,
         0
@@ -155,10 +207,6 @@ export default function InventoryPage() {
         a.click();
     };
 
-    /* ==========================================================
-                            UI
-    ========================================================== */
-
     return (
         <div className="max-w-6xl mx-auto p-6">
             <h1 className="text-2xl font-bold mb-4">Inventory Management</h1>
@@ -167,26 +215,24 @@ export default function InventoryPage() {
 
             <InventoryTable inventory={inventory} exportCSV={exportCSV} />
 
-            {/* -------- History Filter Dropdown -------- */}
+            {/* History Filter */}
             <div className="my-6">
                 <label className="font-medium mr-3">Filter History:</label>
                 <select
                     value={historyFilter}
-                    onChange={(e) =>
-                        setHistoryFilter(e.target.value as any)
-                    }
+                    onChange={(e) => setHistoryFilter(e.target.value as any)}
                     className="border px-3 py-2 rounded"
                 >
-                    <option value="ALL">All History</option>
-                    <option value="PURCHASE">Purchase History</option>
-                    <option value="SALE">Sale History</option>
-                    <option value="ADJUSTMENT">Adjustment History</option>
+                    <option value="ALL">All</option>
+                    <option value="PURCHASE">Purchases</option>
+                    <option value="SALE">Sales</option>
+                    <option value="ADJUSTMENT">Adjustments</option>
                 </select>
             </div>
 
             <MovementHistory
                 movementHistory={filteredHistory}
-                deleteHistory={() => { }}
+                deleteHistory={deleteHistory}
             />
         </div>
     );

@@ -11,7 +11,7 @@ type ExpenseCategory =
     | "Marketing"
     | "uber"
     | "Permissions / Licenses"
-    | "Miscellaneous"
+    | "Traval Cost"
     | "Other";
 
 type Expense = {
@@ -31,7 +31,7 @@ const defaultCategories: ExpenseCategory[] = [
     "Marketing",
     "uber",
     "Permissions / Licenses",
-    "Miscellaneous",
+    "Traval Cost",
     "Other",
 ];
 

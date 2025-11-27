@@ -58,7 +58,7 @@ export default function BillingPage() {
                 );
             }
 
-            const defaultPrice = item.sellingPrice ?? 100;
+            const defaultPrice = item.sellingPrice ?? 200;
 
             return [
                 ...prev,

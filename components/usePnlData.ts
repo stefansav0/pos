@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-/* TYPES — correct */
+/* ---------- TYPES ---------- */
 type Purchase = {
     _id: string;
     itemName: string;
@@ -51,39 +51,45 @@ type Expense = {
     createdAt: string;
 };
 
+type Wastage = {
+    _id: string;
+    itemName: string;
+    qty: number;
+    createdAt: string;
+};
+
 export function usePnlData() {
     const [purchases, setPurchases] = useState<Purchase[]>([]);
     const [sales, setSales] = useState<Sale[]>([]);
     const [inventory, setInventory] = useState<InventoryItem[]>([]);
     const [adjustments, setAdjustments] = useState<Adjustment[]>([]);
     const [expenses, setExpenses] = useState<Expense[]>([]);
+    const [wastage, setWastage] = useState<Wastage[]>([]);
     const [loading, setLoading] = useState(true);
 
-    /* ========== SAFE FETCH WRAPPER ========== */
+    /* ---------- SAFE FETCH ---------- */
     const safeFetch = async (url: string) => {
         try {
             const res = await fetch(url);
-            if (!res.ok) {
-                console.error(`API FAILED ${url}:`, res.status);
-                return [];
-            }
+            if (!res.ok) return [];
             return await res.json();
-        } catch (err) {
-            console.error("Network error:", err);
+        } catch {
             return [];
         }
     };
 
-    /* ========== LOAD ALL DATA ========== */
+    /* ---------- LOAD ALL ---------- */
     const fetchAll = async () => {
         setLoading(true);
+
         try {
-            const [p, s, i, a, e] = await Promise.all([
+            const [p, s, i, a, e, w] = await Promise.all([
                 safeFetch("/api/purchases"),
                 safeFetch("/api/sales"),
                 safeFetch("/api/inventory"),
                 safeFetch("/api/adjustments"),
                 safeFetch("/api/expenses"),
+                safeFetch("/api/wastage"),   // ✅ NEW
             ]);
 
             setPurchases(p);
@@ -91,6 +97,7 @@ export function usePnlData() {
             setInventory(i);
             setAdjustments(a);
             setExpenses(e);
+            setWastage(w); // ✅ NEW
         } finally {
             setLoading(false);
         }
@@ -100,29 +107,53 @@ export function usePnlData() {
         fetchAll();
     }, []);
 
-    /* ========== EVENTS LOGIC ========== */
+    /* ----------------------------------------------------------------
+        🔥 MERGE ALL EVENTS INTO ONE P&L DATASET
+    ---------------------------------------------------------------- */
     const events = useMemo(() => {
         const ev: { date: string; type: string; amount: number }[] = [];
 
+        /* SALES */
         sales.forEach((s) => {
-            ev.push({ date: s.createdAt, type: "SALE_REVENUE", amount: s.revenueTotal });
-            ev.push({ date: s.createdAt, type: "SALE_COGS", amount: s.cogsTotal });
+            ev.push({
+                date: s.createdAt,
+                type: "SALE_REVENUE",
+                amount: s.revenueTotal,
+            });
+            ev.push({
+                date: s.createdAt,
+                type: "SALE_COGS",
+                amount: s.cogsTotal,
+            });
         });
 
+        /* PURCHASE TRAVEL EXPENSE */
         purchases.forEach((p) => {
             const travel = Number(p.travelCost || 0);
-            if (travel > 0)
-                ev.push({ date: p.createdAt, type: "PURCHASE_TRAVEL", amount: travel });
+            if (travel > 0) {
+                ev.push({
+                    date: p.createdAt,
+                    type: "PURCHASE_TRAVEL",
+                    amount: travel,
+                });
+            }
         });
 
+        /* ADJUSTMENTS = DAMAGE / LOSS */
         adjustments.forEach((a) => {
             if (a.qty < 0) {
                 const inv = inventory.find((i) => i.itemName === a.itemName);
                 const cost = Math.abs(a.qty) * (inv?.avgCostPerUnit || 0);
-                ev.push({ date: a.createdAt, type: "DAMAGE_LOSS", amount: cost });
+
+                ev.push({
+                    date: a.createdAt,
+                    type: "DAMAGE_LOSS",
+                    amount: cost,
+                });
             }
         });
 
+        /* GENERAL EXPENSE */
         expenses.forEach((ex) => {
             ev.push({
                 date: ex.createdAt || ex.date,
@@ -131,10 +162,24 @@ export function usePnlData() {
             });
         });
 
-        return ev.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    }, [sales, purchases, adjustments, expenses, inventory]);
+        /* WASTAGE → treated as expense */
+        wastage.forEach((w) => {
+            const inv = inventory.find((i) => i.itemName === w.itemName);
+            const cost = (inv?.avgCostPerUnit || 0) * w.qty;
 
-    /* ========== GROUP BY PERIOD ========== */
+            ev.push({
+                date: w.createdAt,
+                type: "WASTAGE",
+                amount: cost,
+            });
+        });
+
+        return ev.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }, [sales, purchases, adjustments, expenses, wastage, inventory]);
+
+    /* ----------------------------------------------------------------
+         GROUP BY PERIOD (daily / monthly / yearly)
+    ---------------------------------------------------------------- */
     const groupByPeriod = (period: "day" | "month" | "year") => {
         const map = new Map<
             string,
@@ -148,6 +193,7 @@ export function usePnlData() {
             return map.get(k)!;
         };
 
+        /* Sales revenue & COGS */
         sales.forEach((s) => {
             const d = new Date(s.createdAt);
             const key =
@@ -163,6 +209,7 @@ export function usePnlData() {
             row.profit += s.revenueTotal - s.cogsTotal;
         });
 
+        /* Expenses (travel, damage, wastage, general) */
         events.forEach((ev) => {
             const d = new Date(ev.date);
             const key =
@@ -174,7 +221,7 @@ export function usePnlData() {
 
             const row = ensure(key);
 
-            if (["PURCHASE_TRAVEL", "DAMAGE_LOSS", "GENERAL_EXPENSE"].includes(ev.type)) {
+            if (["PURCHASE_TRAVEL", "DAMAGE_LOSS", "GENERAL_EXPENSE", "WASTAGE"].includes(ev.type)) {
                 row.opExpenses += ev.amount;
                 row.profit -= ev.amount;
             }
@@ -189,10 +236,13 @@ export function usePnlData() {
         inventory,
         adjustments,
         expenses,
+        wastage,
         events,
+
         daily: groupByPeriod("day"),
         monthly: groupByPeriod("month"),
         yearly: groupByPeriod("year"),
+
         loading,
         refreshAll: fetchAll,
     };

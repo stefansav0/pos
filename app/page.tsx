@@ -49,6 +49,12 @@ export default function HomePage() {
       color: "bg-orange-100 text-orange-700",
     },
     {
+      name: "wastege",
+      href: "/wastage",
+      icon: <Calculator className="w-8 h-8" />,
+      color: "bg-orange-100 text-orange-700",
+    },
+    {
       name: "P&L Dashboard",
       href: "/dashboard",
       icon: <TrendingUp className="w-8 h-8" />,

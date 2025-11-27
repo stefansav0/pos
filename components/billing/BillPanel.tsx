@@ -2,9 +2,9 @@ import CartTable from "./CartTable";
 import BillTotals from "./BillTotals";
 import CustomerForm from "./CustomerForm";
 import BillingButton from "./BillingButton";
-import { SmartphoneCharging } from "lucide-react";
+import { SmartphoneCharging, CheckCircle, Download } from "lucide-react";
+import { useMemo, useState } from "react";
 
-/* --- Types reused from main page --- */
 type CartItem = {
     id: string;
     itemName: string;
@@ -54,6 +54,45 @@ export default function BillPanel({
     handleBilling,
     clearCart,
 }: BillPanelProps) {
+
+    /* ======================================================
+                1) AUTO GENERATE UPI QR URL
+    ====================================================== */
+    const upiId = "yourupi@bank"; // CHANGE THIS TO YOUR UPI ID
+
+    const upiURL = useMemo(() => {
+        return `upi://pay?pa=${upiId}&pn=${encodeURIComponent(
+            customerName || "Customer"
+        )}&am=${grandTotal}&tn=${encodeURIComponent("Bill Payment")}`;
+    }, [customerName, grandTotal]);
+
+    const qrImg = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+        upiURL
+    )}`;
+
+    /* ======================================================
+                2) PAYMENT RECEIVED BUTTON
+    ====================================================== */
+    const [paymentReceived, setPaymentReceived] = useState(false);
+
+    const markPaymentReceived = () => {
+        setPaymentReceived(true);
+        handleBilling(); // auto generate bill
+    };
+
+    /* ======================================================
+                3) DOWNLOAD QR IMAGE
+    ====================================================== */
+    const downloadQR = () => {
+        const link = document.createElement("a");
+        link.href = qrImg;
+        link.download = `UPI_QR_${grandTotal}.png`;
+        link.click();
+    };
+
+    /* ======================================================
+                          UI
+    ====================================================== */
     return (
         <section className="w-full lg:w-80 xl:w-96 bg-white rounded-lg shadow-sm border flex flex-col">
             {/* Header */}
@@ -87,7 +126,7 @@ export default function BillPanel({
                 grandTotal={grandTotal}
             />
 
-            {/* Customer */}
+            {/* Customer Form */}
             <CustomerForm
                 customerName={customerName}
                 setCustomerName={setCustomerName}
@@ -97,20 +136,53 @@ export default function BillPanel({
                 setWaiterName={setWaiterName}
             />
 
-            {/* UPI Section */}
-            <div className="px-3 py-2 border-t">
-                <div className="flex items-center gap-2 border p-2 rounded-md">
-                    <SmartphoneCharging className="w-5 h-5 text-teal-600" />
-                    <div className="text-[11px]">
-                        <div className="font-semibold">UPI Payment</div>
-                        <div className="text-gray-600">
-                            Ask customer to scan QR & pay ₹{grandTotal.toFixed(2)}
-                        </div>
+            {/* -------------------------------------------------------
+                           UPI PAYMENT + QR
+            ------------------------------------------------------- */}
+            <div className="px-3 py-3 border-t">
+                <div className="text-sm font-semibold mb-2">UPI Payment</div>
+
+                {/* QR Box */}
+                <div className="bg-gray-50 rounded-md p-3 flex flex-col items-center border">
+                    <img src={qrImg} alt="UPI QR" className="w-40 h-40" />
+
+                    <div className="mt-2 text-xs text-gray-600">
+                        Scan to pay ₹{grandTotal.toFixed(2)}
                     </div>
+
+                    {/* Download QR */}
+                    <button
+                        onClick={downloadQR}
+                        className="mt-3 px-3 py-1.5 text-xs bg-gray-800 text-white rounded flex items-center gap-1"
+                    >
+                        <Download size={14} /> Download QR
+                    </button>
                 </div>
             </div>
 
-            {/* Billing Button */}
+            {/* -------------------------------------------------------
+                         CONFIRM PAYMENT RECEIVED
+            ------------------------------------------------------- */}
+            <div className="px-3 py-2 border-t">
+                <button
+                    onClick={markPaymentReceived}
+                    className={`w-full py-2 rounded text-white font-semibold flex items-center justify-center gap-2
+                        ${paymentReceived ? "bg-green-600" : "bg-blue-600"}
+                    `}
+                >
+                    {paymentReceived ? (
+                        <>
+                            <CheckCircle size={18} /> Payment Received
+                        </>
+                    ) : (
+                        <>
+                            <SmartphoneCharging size={18} /> Mark as Paid
+                        </>
+                    )}
+                </button>
+            </div>
+
+            {/* Billing Button (Generate PDF / Bill) */}
             <BillingButton grandTotal={grandTotal} handleBilling={handleBilling} />
         </section>
     );

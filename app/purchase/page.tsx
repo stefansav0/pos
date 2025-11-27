@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "@/lib/api";
+import * as XLSX from "xlsx";
 
 /* ---------- TYPES ---------- */
 type UnitType = "KG" | "UNIT";
@@ -35,6 +36,10 @@ export default function PurchasePage() {
 
     /* ---------- FORM STATE ---------- */
     const [itemName, setItemName] = useState("");
+    useEffect(() => {
+        loadAll();
+    }, []);
+
     const [unitType, setUnitType] = useState<UnitType>("KG");
     const [qty, setQty] = useState(1);
     const [purchaseCost, setPurchaseCost] = useState(0);
@@ -43,10 +48,6 @@ export default function PurchasePage() {
     const [notes, setNotes] = useState("");
 
     /* ---------- LOAD FROM MONGO ---------- */
-    useEffect(() => {
-        loadAll();
-    }, []);
-
     const loadAll = async () => {
         const [p, inv] = await Promise.all([
             apiGet("/api/purchases"),
@@ -68,7 +69,39 @@ export default function PurchasePage() {
         return { totalUnits, costPerUnit };
     };
 
-    /* ---------- ADD PURCHASE (Mongo + Inventory Update) ---------- */
+    /* ==========================================================
+                        UPDATE INVENTORY (Weighted Avg)
+    =========================================================== */
+    const updateInventory = async (name: string, totalUnits: number, costPerUnit: number) => {
+        const existing = inventory.find(
+            (i) => i.itemName.toLowerCase() === name.toLowerCase()
+        );
+
+        if (!existing) {
+            await apiPost("/api/inventory", {
+                itemName: name,
+                unitsAvailable: totalUnits,
+                avgCostPerUnit: costPerUnit,
+            });
+            return;
+        }
+
+        const newUnits = existing.unitsAvailable + totalUnits;
+        const newAvg =
+            (existing.avgCostPerUnit * existing.unitsAvailable +
+                costPerUnit * totalUnits) /
+            newUnits;
+
+        await apiPost("/api/inventory", {
+            itemName: name,
+            unitsAvailable: newUnits,
+            avgCostPerUnit: newAvg,
+        });
+    };
+
+    /* ==========================================================
+                       ADD SINGLE PURCHASE
+    =========================================================== */
     const onAddPurchase = async () => {
         if (!itemName.trim()) return alert("Enter item name");
         if (qty <= 0) return alert("Enter valid quantity");
@@ -84,75 +117,40 @@ export default function PurchasePage() {
             containersPerKg: unitType === "KG" ? containersPerKg : undefined,
             totalUnitsProduced: totalUnits,
             costPerUnit,
-            notes: notes.trim(),
+            notes: notes || "",
             createdAt: new Date().toISOString(),
         };
 
-        // 1️⃣ Save purchase in Mongo
-        const savedPurchase = await apiPost("/api/purchases", newPurchase);
+        await apiPost("/api/purchases", newPurchase);
 
-        // 2️⃣ Update inventory logic (weighted average)
-        let invPayload;
+        await updateInventory(itemName.trim(), totalUnits, costPerUnit);
 
-        const existing = inventory.find(
-            (it) => it.itemName.toLowerCase() === itemName.trim().toLowerCase()
-        );
-
-        if (!existing) {
-            // New inventory item
-            invPayload = {
-                itemName: itemName.trim(),
-                unitsAvailable: totalUnits,
-                avgCostPerUnit: costPerUnit,
-            };
-        } else {
-            const newUnits = existing.unitsAvailable + totalUnits;
-            const newAvg =
-                (existing.avgCostPerUnit * existing.unitsAvailable +
-                    costPerUnit * totalUnits) /
-                newUnits;
-
-            invPayload = {
-                itemName: existing.itemName,
-                unitsAvailable: newUnits,
-                avgCostPerUnit: newAvg,
-            };
-        }
-
-        // 3️⃣ Save inventory in Mongo
-        await apiPost("/api/inventory", invPayload);
-
-        alert("Purchase + Inventory updated!");
-
-        // reload fresh data
         await loadAll();
 
-        // Reset form
         setQty(1);
         setPurchaseCost(0);
         setPackagingCost(0);
         setNotes("");
     };
 
-    /* ---------- DELETE PURCHASE (Mongo only) ---------- */
+    /* ==========================================================
+                           DELETE PURCHASE
+    =========================================================== */
     const deletePurchase = async (id: string) => {
         if (!confirm("Delete purchase? Inventory will NOT rollback.")) return;
-
         await fetch(`/api/purchases?id=${id}`, { method: "DELETE" });
-
         await loadAll();
     };
 
-    /* ---------- DELETE INVENTORY ITEM ---------- */
     const deleteInventoryItem = async (name: string) => {
         if (!confirm("Delete inventory item?")) return;
-
         await fetch(`/api/inventory?name=${name}`, { method: "DELETE" });
-
         await loadAll();
     };
 
-    /* ---------- SUMMARY ---------- */
+    /* ==========================================================
+                       SUMMARY VALUES
+    =========================================================== */
     const totalInventoryValue = inventory.reduce(
         (s, it) => s + it.unitsAvailable * it.avgCostPerUnit,
         0
@@ -163,15 +161,104 @@ export default function PurchasePage() {
         0
     );
 
-    /* ---------- UI ---------- */
+    /* ==========================================================
+                      EXCEL EXPORT TEMPLATE
+    =========================================================== */
+    const exportExcel = () => {
+        const headers = [
+            [
+                "Item Name",
+                "Unit Type (KG/UNIT)",
+                "Qty",
+                "Purchase Cost",
+                "Packaging Cost",
+                "Containers Per KG",
+                "Notes",
+            ],
+        ];
+
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(headers);
+
+        XLSX.utils.book_append_sheet(wb, ws, "Template");
+
+        XLSX.writeFile(wb, "Purchase_Template.xlsx");
+    };
+
+    /* ==========================================================
+                      BULK IMPORT EXCEL
+    =========================================================== */
+    const importExcel = async (e: any) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json<any>(sheet);
+
+        for (let r of rows) {
+            const name = r["Item Name"]?.toString().trim();
+            const type = (r["Unit Type (KG/UNIT)"] || "KG") as UnitType;
+            const qty = Number(r["Qty"] || 0);
+            const pc = Number(r["Purchase Cost"] || 0);
+            const pkg = Number(r["Packaging Cost"] || 0);
+            const cpk = Number(r["Containers Per KG"] || 5);
+            const notes = r["Notes"] || "";
+
+            if (!name || qty <= 0) continue;
+
+            const totalUnits = type === "KG" ? qty * cpk : qty;
+            const costPerUnit = totalUnits ? (pc + pkg) / totalUnits : 0;
+
+            const purchaseData: Purchase = {
+                itemName: name,
+                unitType: type,
+                qty,
+                purchaseCost: pc,
+                packagingCost: pkg,
+                containersPerKg: type === "KG" ? cpk : undefined,
+                totalUnitsProduced: totalUnits,
+                costPerUnit,
+                notes,
+                createdAt: new Date().toISOString(),
+            };
+
+            await apiPost("/api/purchases", purchaseData);
+            await updateInventory(name, totalUnits, costPerUnit);
+        }
+
+        alert("Bulk purchase imported.");
+        await loadAll();
+    };
+
+    /* ==========================================================
+                              UI
+    =========================================================== */
+
     return (
         <div className="max-w-6xl mx-auto p-6">
             <h1 className="text-2xl font-bold mb-4">Purchase (MongoDB) — Add Item</h1>
 
-            {/* FORM + INVENTORY */}
+            {/* Excel Buttons */}
+            <div className="flex flex-wrap gap-4 mb-6">
+                <button
+                    onClick={exportExcel}
+                    className="px-4 py-2 bg-green-600 text-white rounded"
+                >
+                    Download Excel Template
+                </button>
+
+                <label className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer">
+                    Import Excel
+                    <input type="file" className="hidden" accept=".xlsx,.xls" onChange={importExcel} />
+                </label>
+            </div>
+
+            {/* ---------------- FORM + INVENTORY ---------------- */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
 
-                {/* FORM */}
+                {/* ---------------- FORM ---------------- */}
                 <div className="p-4 border bg-white rounded">
                     <h2 className="font-semibold mb-3">Purchase Details</h2>
 
@@ -239,7 +326,7 @@ export default function PurchasePage() {
                         onChange={(e) => setNotes(e.target.value)}
                     />
 
-                    {/* PREVIEW */}
+                    {/* ---------- PREVIEW ---------- */}
                     <div className="bg-gray-50 p-3 rounded mb-3 text-sm">
                         {(() => {
                             const { totalUnits, costPerUnit } = computeProducedAndCost();
@@ -261,7 +348,7 @@ export default function PurchasePage() {
                     </button>
                 </div>
 
-                {/* INVENTORY */}
+                {/* ---------------- INVENTORY ---------------- */}
                 <div className="p-4 border bg-white rounded">
                     <h2 className="font-semibold mb-3">Inventory Snapshot</h2>
 
@@ -301,7 +388,9 @@ export default function PurchasePage() {
                                             </td>
                                             <td className="p-2 border">
                                                 <button
-                                                    onClick={() => deleteInventoryItem(it.itemName)}
+                                                    onClick={() =>
+                                                        deleteInventoryItem(it.itemName)
+                                                    }
                                                     className="text-red-600"
                                                 >
                                                     Delete
@@ -317,7 +406,7 @@ export default function PurchasePage() {
 
             </div>
 
-            {/* PURCHASE LIST */}
+            {/* ---------------- PURCHASE LIST ---------------- */}
             <div className="p-4 bg-white rounded border">
                 <h2 className="font-semibold mb-3">Purchases</h2>
 

@@ -72,13 +72,23 @@ export default function BillingPage() {
         });
     };
 
+    /** ------------------ FIXED: AUTO REMOVE WHEN QTY IS NONE OR 0 ------------------ */
     const changeQty = (id: string, delta: number) => {
         setCart((prev: CartItem[]) =>
             prev
-                .map((c) =>
-                    c.id === id ? { ...c, qty: Math.max(1, c.qty + delta) } : c
-                )
-                .filter((c) => c.qty > 0)
+                .map((c) => {
+                    if (c.id !== id) return c;
+
+                    const newQty = (c.qty ?? 0) + delta;
+
+                    // Auto remove when qty becomes None, 0, negative, or NaN
+                    if (!newQty || newQty <= 0 || isNaN(newQty)) {
+                        return null; // mark for removal
+                    }
+
+                    return { ...c, qty: newQty };
+                })
+                .filter((c) => c !== null) as CartItem[]
         );
     };
 

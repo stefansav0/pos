@@ -58,7 +58,7 @@ export default function BillPanel({
     /* ======================================================
                 1) AUTO GENERATE UPI QR URL
     ====================================================== */
-    const upiId = "yourupi@bank"; // CHANGE THIS TO YOUR UPI ID
+    const upiId = "6296018033.wallet@phonepe"; // CHANGE THIS TO YOUR UPI ID
 
     const upiURL = useMemo(() => {
         return `upi://pay?pa=${upiId}&pn=${encodeURIComponent(

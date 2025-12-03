@@ -21,15 +21,39 @@ export default function MenuGrid({ menu, addToCart }: MenuGridProps) {
 
     return (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3 overflow-y-auto">
-            {menu.map((item: InventoryItem) => (
-                <button
-                    key={item._id ?? item.itemName}
-                    onClick={() => addToCart(item)}
-                    className="h-16 sm:h-20 text-xs sm:text-sm border rounded-md bg-slate-50 hover:bg-teal-50 flex items-center justify-center text-center px-2"
-                >
-                    {item.itemName}
-                </button>
-            ))}
+            {menu.map((item: InventoryItem) => {
+                const outOfStock = !item.unitsAvailable || item.unitsAvailable <= 0;
+
+                return (
+                    <button
+                        key={item._id ?? item.itemName}
+                        onClick={() => !outOfStock && addToCart(item)}
+                        disabled={outOfStock}
+                        className={`h-18 sm:h-24 text-xs sm:text-sm border rounded-md 
+                            flex flex-col items-center justify-center px-2 text-center
+                            transition-all 
+                            ${outOfStock
+                                ? "bg-gray-200 cursor-not-allowed opacity-50"
+                                : "bg-slate-50 hover:bg-teal-50 cursor-pointer"
+                            }`}
+                    >
+                        {/* ITEM NAME */}
+                        <div className="font-medium">{item.itemName}</div>
+
+                        {/* AVAILABLE STOCK */}
+                        <div className="text-[10px] sm:text-xs text-gray-600 mt-1">
+                            Available: <span className="font-semibold">
+                                {item.unitsAvailable ?? 0}
+                            </span>
+                        </div>
+
+                        {/* PRICE */}
+                        <div className="text-green-600 font-bold mt-1 text-[11px] sm:text-sm">
+                            ₹{item.sellingPrice ?? 200}
+                        </div>
+                    </button>
+                );
+            })}
         </div>
     );
 }

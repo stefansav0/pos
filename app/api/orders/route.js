@@ -6,6 +6,7 @@ export async function GET() {
     await dbConnect();
     const orders = await Order.find().sort({ createdAt: -1 });
     return Response.json(orders);
+
 }
 
 export async function POST(req) {
